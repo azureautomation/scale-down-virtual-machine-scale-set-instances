@@ -9,7 +9,7 @@
 
 param (
 	[parameter(Mandatory = $false)]
-    [object]$WebhookData
+    	[object]$WebhookData
 )
 
 if ($WebhookData -ne $null) {  
@@ -21,33 +21,28 @@ if ($WebhookData -ne $null) {
 	$WebhookBody    =   $WebhookData.RequestBody
 	
 	# Obtain the WebhookBody containing the AlertContext
-    $WebhookBody = (ConvertFrom-Json -InputObject $WebhookBody)
+   	$WebhookBody = (ConvertFrom-Json -InputObject $WebhookBody)
 	
 	if ($WebhookBody.status -eq "Activated") {
 		
-		$connectionName = "AzureRunAsConnection"
-		try
-		{
-		    # Get the connection "AzureRunAsConnection "
-		    $servicePrincipalConnection=Get-AutomationConnection -Name $connectionName         
-		
-		    "Logging in to Azure..."
-		    Add-AzureRmAccount `
-		        -ServicePrincipal `
-		        -TenantId $servicePrincipalConnection.TenantId `
-		        -ApplicationId $servicePrincipalConnection.ApplicationId `
-		        -CertificateThumbprint $servicePrincipalConnection.CertificateThumbprint 
-		}
-		catch {
-		    if (!$servicePrincipalConnection)
-		    {
-		        $ErrorMessage = "Connection $connectionName not found."
-		        throw $ErrorMessage
-		    } else{
-		        Write-Error -Message $_.Exception
-		        throw $_.Exception
-		    }
-		}
+        # Ensures you do not inherit an AzContext in your runbook
+        Disable-AzContextAutosave -Scope Process
+
+        try
+        {
+            "Logging in to Azure..."           
+
+            # Connect to Azure with system-assigned managed identity
+            $AzureContext = (Connect-AzAccount -Identity).context
+
+            # set and store context
+            $AzureContext = Set-AzContext -SubscriptionName $AzureContext.Subscription -DefaultProfile $AzureContext
+        }
+        catch {
+
+            Write-Error -Message $_.Exception
+            throw $_.Exception
+        }
 		
 		# Obtain the AlertContext
 		$AlertContext = [object]$WebhookBody.context
@@ -234,7 +229,7 @@ if ($WebhookData -ne $null) {
 		  } 
 		
 		try {
-		    $vmss = Get-AzureRmVmss -ResourceGroupName $ResourceGroupName -VMScaleSetName $VmssName -ErrorAction Stop
+		    $vmss = Get-AzVmss -ResourceGroupName $ResourceGroupName -VMScaleSetName $VmssName -DefaultProfile $AzureContext -ErrorAction Stop
 		} catch {
 		    Write-Error "Virtual Machine Scale Set not found"
 		    exit
@@ -250,19 +245,19 @@ if ($WebhookData -ne $null) {
 		$newVmssSize = $scaleDown[$currentVmssSize]
 		
 		if($newVmssSize -eq $noResize -or [string]::IsNullOrEmpty($newVmssSize)) {
-		    Write-Output "Sorry the current Virtual Machine Scale Set size $currentVmssSize can't be scaled up. You'll need to recreate the specified Virtual Machine Scale Set with your requested size"
+		    	Write-Output "Sorry the current Virtual Machine Scale Set size $currentVmssSize can't be scaled up. You'll need to recreate the specified Virtual Machine Scale Set with your requested size"
 		} else {
-		    Write-Output "`nNew size will be: $newVmssSize"
 
+		    	Write-Output "`nNew size will be: $newVmssSize"
 			$vmss.Sku.Name = $newVmssSize
-		    Update-AzureRmVmss -ResourceGroupName $ResourceGroupName -Name $VmssName -VirtualMachineScaleSet $vmss
-			Update-AzureRmVmssInstance -ResourceGroupName $ResourceGroupName -VMScaleSetName $VmssName -InstanceId "*"
+		    	Update-AzVmss -ResourceGroupName $ResourceGroupName -Name $VmssName -VirtualMachineScaleSet $vmss -DefaultProfile $AzureContext
+			Update-AzVmssInstance -ResourceGroupName $ResourceGroupName -VMScaleSetName $VmssName -InstanceId "*" -DefaultProfile $AzureContext
 				
-		    $updatedVmss = Get-AzureRmVmss -ResourceGroupName $ResourceGroupName -VMScaleSetName $VmssName
-		    $updatedVmssSize = $updatedVmss.Sku.Name
+		    	$updatedVmss = Get-AzVmss -ResourceGroupName $ResourceGroupName -VMScaleSetName $VmssName -DefaultProfile $AzureContext
+		   	$updatedVmssSize = $updatedVmss.Sku.Name
 
-		    Write-Output "`nSize updated to: $updatedVmssSize"
-		}
+		    	Write-Output "`nSize updated to: $updatedVmssSize"
+			}
 	} else {
 		Write-Output "`nAlert not activated"
 		exit
